@@ -10,45 +10,13 @@ A general module name. In this demo, it contains:
 module src
     import Distributions
 
-    export u_CRRA, approx_ar1
+    export approx_ar1
     export DiscreteMarkovChain, stationary_distribution
     export DiscreteTimeAR1
+    export golden_section, golden_section_improved
 
 
-# --------------- CRRA UTILITY
-"""
-    u_CRRA(c::Real ; γ::Real = 1.5, ψ::Real = 1E-12)
 
-CRRA utility `` u(c) = [ (c+\\psi)^{1-\\gamma} - 1 ] / (1 - \\gamma) ``,
-where `ψ` is a minor amount to avoid absolute zero, `c` must be non-negative and finite,
-and `γ` is relative risk aversion. It must be greater than 0.
-When `γ` is 1, CRRA degenerates to logarithm utility ``u(c) = \\ln(c+\\psi)``.
-This function returns a `Real` value of utility.
-
-Timing information:
-```
-BenchmarkTools.Trial:
-  memory estimate:  0 bytes
-  allocs estimate:  0
-  --------------
-  minimum time:     1.201 ns (0.00% GC)
-  median time:      1.202 ns (0.00% GC)
-  mean time:        1.478 ns (0.00% GC)
-  maximum time:     50.175 ns (0.00% GC)
-  --------------
-  samples:          10000
-  evals/sample:     1000
-```
-"""
-function u_CRRA(c::Real ; γ::Real = 1.5, ψ::Real = 1E-12)
-    # assertion
-    @assert( 0 <= c < Inf, "c must be non-negative and finite" )
-    @assert( 0 <= γ < Inf, "γ must be non-negative and finite" )
-    @assert( ψ >= 0, "ψ must be non-negative" )
-    # branch
-    γ == 1 ? (return log(c + ψ)::Real) : nothing
-    return ( ((c+ψ)^(1-γ) - 1) / (1-γ) )::Real
-end # u_CRRA
 
 
 
@@ -181,6 +149,178 @@ end # approx_ar1
 approx_ar1(ar1::DiscreteTimeAR1 ; m::Int = 9, λ::Real = 3) = begin
     return approx_ar1(ar1.ρ, ar1.σ, m = m, λ = λ, Z̄ = ar1.Z̄)::DiscreteMarkovChain
 end # approx_ar1
+
+
+
+# ----------------------- Linear interpolation & expolation
+"""
+    linear_function_interpolation( x0::Real, xsamples::Vector{T} where T <: Real, fsamples::Vector{T} where T <: Real )
+
+linear interpolation on one-parameter function `f(x)` which is defined by a vector of sample `x` points
+and a vector of sample `f(x)` corresponding to sample `x`;
+`xsamples` should be increasingly sorted.
+returns the function value evaluated at the given point `x0`.
+if `x0<findmin(x)` or `x0>findmax(x)`, this function uses the linear expolation
+of minimum/maximum sample `x` and the second minimum/maximum sample `x`.
+"""
+function linear_function_interpolation( x0::Real, xsamples::Vector{T} where T <: Real, fsamples::Vector{T} where T <: Real )
+    issorted(xsamples) ? nothing : throw(ErrorException("xsamples should be pre-sorted"))
+    local N = length(fsamples); local xmax = xsamples[end]; local xmin = xsamples[1]
+    local x0_location = (x0 - xmin) / (xmax - xmin) * (N - 1) + 1  # locating x0
+    local nearest_xsample_loc = floor(Int,x0_location)  # the nearest sample x point (on the left side) to interpolate x0
+    local dist_from_nearest_xsample = x0_location - nearest_xsample_loc # the fractional distance between x0 and the nearest x point
+    # NOTE: relationship: x[near] < x0 < x[near+1]
+
+    # case: if touching the upper bound
+    if (x0 > xmax) | (nearest_xsample_loc == N)  # to prevent BoundsError at index N
+        res = fsamples[end]
+        return res::Float64
+    # case: if touching the lower bound
+    elseif (x0 <= xmin) | (nearest_xsample_loc == 1)
+        res = fsamples[1] - (1 - x0_location) * ( fsamples[2] - fsamples[1] )
+        return res::Float64
+    # case: normal case
+    else
+        res = (1 - dist_from_nearest_xsample) * fsamples[nearest_xsample_loc] +
+            dist_from_nearest_xsample * fsamples[nearest_xsample_loc + 1]
+        return res::Float64
+    end # if
+
+end # linear_function_interpolation
+
+
+
+
+
+# ------------------------------ conventional Golden Section for 1-parameter function
+"""
+    golden_section(f::Function, lb::Real, ub::Real ; atol::Real = 1E-8, maxiter::Int = 5000)
+
+conventional Golden Section search for MINIMIZATION problem.
+`f` must only receive one `Real` type location parameter;
+`lb` is the finite lower bound of searching; `ub` is the finite upper bound of searching;
+`atol` is the absolute error to converge,
+and `maxiter` sets the maximum loops to prevent dead loop.
+returns a `Tuple` (in order) consisting of optimal x, optimal `f` value, a flag indicating if converged,
+and in which round the algorithm ends.
+
+testing code:
+```
+g(x::Real) = (x-1)^2
+BenchmarkTools.@benchmark tmp = src.golden_section(g,-1.0,3.0,atol=1E-12)
+```
+
+performance tips:
+```
+BenchmarkTools.Trial:
+  memory estimate:  96 bytes
+  allocs estimate:  1
+  --------------
+  minimum time:     144.933 ns (0.00% GC)
+  median time:      150.576 ns (0.00% GC)
+  mean time:        181.232 ns (7.65% GC)
+  maximum time:     71.892 μs (99.47% GC)
+  --------------
+  samples:          10000
+  evals/sample:     852
+```
+"""
+function golden_section(f::Function, lb::Real, ub::Real ; atol::Real = 1E-8, maxiter::Int = 5000)
+    @assert(-Inf < lb < ub < Inf, "lb must be less than ub, both must be finite")
+    local goldnum = 0.618033988749895  # the golden number
+    local bounds = [lb,ub]  # changable bounds to update
+    local left_x = bounds[1] + (1-goldnum) * (bounds[2] - bounds[1])  # left trial
+    local right_x = bounds[1] + goldnum * (bounds[2]-bounds[1])  # right trial
+    # initial evaluation (NOTE: using type assertion to test if `f` only returns one `Real` value)
+    local left_fval::Real = f(left_x)
+    local right_fval::Real = f(right_x)
+    # test if both trials are defined & finite (because NaN & Inf cannot be operated rationally)
+    if isnan(left_fval) | isinf(left_fval) | isnan(left_fval) | isinf(left_fval)
+        throw(DomainError("NaN or Inf function value(s) found in the initial evaluation of Golden section search"))
+    end # if
+    # begin search
+    for j in 1:maxiter
+        # check convergency
+        if abs(bounds[2]-bounds[1]) < atol
+            local finalx::Real = (bounds[1] + bounds[2]) / 2
+            return ( finalx, f(finalx), true, j )::Tuple
+        end # if
+        # if not converge, go on to update
+        if left_fval > right_fval
+            bounds[1] = left_x; bounds[2] = bounds[2]; left_x = right_x
+            right_x = bounds[1] + goldnum * (bounds[2] - bounds[1])
+            left_fval = f(left_x)
+            right_fval = f(right_x)
+        else # i.e. if left_fval <= right_fvals
+            bounds[1] = bounds[1]; bounds[2] = right_x; right_x = left_x
+            left_x = bounds[1] + (1-goldnum) * (bounds[2] - bounds[1])
+            left_fval = f(left_x)
+            right_fval = f(right_x)
+        end # if
+    end # for j
+    # if loop normally ends, it means that the algorithm did not converge
+    local finalx::Real = (left_x+right_x)/2
+    return ( finalx, f(finalx), false, maxiter )::Tuple
+end # golden_section
+
+
+
+
+# ---------------------------- improved Golden Section search
+"""
+    golden_section_improved(f::Function, LLB::Float64, LB::Float64, RB::Float64 ;  TOL::Float64=1E-08, ITER=300)
+
+improved Golden Section search, using a third point x_mid between (x_low,x_high) to improve performance.
+designed for one-dim function MAXIMIZATION problem
+
+Par:
+    1. f [annonymous func]: target to search (a maximization problem), it MUST HAVE ONLY ONE PARAMETER f(x)
+    1. LLB [num]: the (initial) very left bound of searching (initial)
+    1. LB [num]: the (initial) left bound of searching
+    1. RB [num]: the (initial) right bound of searching
+    1. TOL [num]: tolerance, 1E-4 or 1E-5 is enough
+    1. ITER [int]: maximum iteration times in searching
+
+Ret:
+    1. Xmin [num]: the solution
+
+Depend:
+    1. func
+"""
+function golden_section_improved(f::Function, LLB::Real, LB::Real, RB::Real ;  TOL::Float64=1E-08)
+    # -------- DATA PROCESS ----------
+    # NOTE: in Julia, the golden numebr is an integrated const (before v0.6), but we redefine a golden number for case in v1.0 and later
+    GoldenNumber = 1.618033988749895
+    r1 = GoldenNumber - 1; r2 = 1 - r1
+    x0 = LLB; x3 = RB # initia-lize bounds
+    if abs(RB-LB)<=abs(LB-LLB)
+        x1 = LB; x2 = LB+r2*(RB-LB)
+    else
+        x2 = LB; x1 = LB-r2*(LB-LLB)
+    end
+    # initialization of function value (and turns a maximization to a minimization)
+    f1 = - f(x1); f2 = - f(x2)
+    # Searching
+    while true
+        if f2<f1
+            x0=x1 # Update the very lower bound
+            x1=x2; x2=r1*x1+r2*x3 # new left golden position
+            f1=f2; f2= - f(x2)
+        else
+            x3=x2; x2=x1; x1=r1*x2+r2*x0; f2=f1; f1= - f(x1)
+        end # if
+        if abs(x3-x0) > TOL * (abs(x1)+abs(x2))
+            break
+        end # if
+    end # while
+    # Post-convergence
+    Xmin = f1<=f2 ? x1 : x2
+
+    return Xmin::Float64
+end
+
+
+
 
 
 
