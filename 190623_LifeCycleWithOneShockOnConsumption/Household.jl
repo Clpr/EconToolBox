@@ -9,7 +9,7 @@ depends on our custom module `src`
 module Household
     import src # custom module, also requires Distributions package; used in dynamic programming
 
-    export LifeCycleDatPkg, solve, solve_dp
+    export LifeCycleDatPkg, solve, get_a, solve_dp
 
 
 # --------------- CRRA UTILITY
@@ -93,8 +93,9 @@ demodat = LifeCycleDatPkg(
 
 
 
-
-# ---------------- Solver
+# ------------------------------------------------------------------------------
+# NOTE: the following section is for ANALYTICAL solution WITHOUT borrowing constraints
+# ---------------- Analytical Solver (no borrowing constraint)
 """
     solve(m::LifeCycleDatPkg)
 
@@ -121,7 +122,7 @@ function solve(m::LifeCycleDatPkg)
     end # for x
     push!(tildeBA,1.0)
 
-    # 1. define d𝔼G/dc, the derivates of compressed budgeting G on c_{s} (len= S)
+    # 1. define d𝔼G/dc, the derivatives of compressed budgeting G on c_{s} (len= S)
     local d𝔼Gdc::Vector = tildeBA .* m.E ./ m.A
     # 2. define H̄, the Euler equation multiplier (len= S-1), H̄[s]: c[s] -> c[s+1]
     local H̄::Vector = d𝔼Gdc[1:(m.S-1)] ./ d𝔼Gdc[2:m.S]; H̄ .*= m.β; H̄ .^= -m.γ
@@ -146,6 +147,26 @@ function solve(m::LifeCycleDatPkg)
 end # solve
 
 
+
+
+# ----------------- compute a[s], s=2 to S+1 when given c[s], s=1 to S
+"""
+    get_a(d::LifeCycleDatPkg, C::Vector)
+
+when `s` is 1, `d.a1` will be directly returned;
+otherwise, `length(C) >= s-1` requried
+"""
+function get_a(d::LifeCycleDatPkg, s::Int, C::Vector)
+    if s==1; return (d.a1)::Real; end
+    # if not a[1]
+    @assert(length(C) >= (s-1), "length(C) >= s-1 requried")
+    # computing
+    local as::Real = d.a1
+    for x in 1:(s-1)
+        as = ( d.B[x] * as - d.E[x] * C[x] + d.F[x] ) / d.A[x]
+    end # for x
+    return as::Real
+end # get_a
 
 
 

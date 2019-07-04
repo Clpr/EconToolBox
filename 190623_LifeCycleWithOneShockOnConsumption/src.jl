@@ -2,14 +2,16 @@
     src
 
 A general module name. In this demo, it contains:
-1. u::Function, CRRA utility with risk aversion γ
 2. DiscreteMarkovChain, a type to define a discrete Markov chain
 3. stationary_distribution, a function to solve stationary distribution of a `DiscreteMarkovChain`
 4. approx_ar1, approximates an AR(1) process with a discrete Markov Chain
+5. golden_section, Golden Section search
+6. golden_section_improved, improved 3-point Golden Section search
+7. DiscreteMarkovChain, discrete state Markov Chain
 """
 module src
     import Distributions
-
+    # ----------------------
     export approx_ar1
     export DiscreteMarkovChain, stationary_distribution
     export DiscreteTimeAR1

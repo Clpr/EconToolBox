@@ -8,6 +8,7 @@ Please read this blog first.
 
 This demo shows how to use standard solver to solve a life-cycle model with **one** Markov-style shock on consumption.
 It consists of:
+
 |Demo|Description|Time-costing?|Borrowing constraint?|
 |----|-----------|-------------|---------------------|
 |Part 1|Analytical solution | No | Cannot handle it |
