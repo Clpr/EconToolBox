@@ -11,6 +11,8 @@ It includes:
 """
 module TypeCore
     import LinearAlgebra
+
+    export OrdinaryMarkovChain, AR1
 # ==============================
 
 
@@ -36,7 +38,7 @@ Receives: `P` - one-step transition matrix `P[i,j]` (prob from state i to state 
 Requires `P`, the transition probability matrix must be square.
 An `OrdinaryMarkovChain` must have a stationary distribution.
 """
-mutable struct OrdinaryMarkovChain <: AbstractMarkovChain
+struct OrdinaryMarkovChain <: AbstractMarkovChain
     N::Int  # the number of states
     S::Vector{T} where T <: Real  # states (in numbers)
     P::Matrix{Float64}  # (one-step) transition matrix P_{ij}, prob from state i to state j
@@ -53,8 +55,18 @@ mutable struct OrdinaryMarkovChain <: AbstractMarkovChain
 end # OrdinaryMarkovChain
 
 
+# ---------------------
+"""
+    AR1
 
-
+AR(1) process ``x_{t+1}=c+\\rho x_{t}+\\varepsilon_{t}``
+where ``\\varepsilon_{t}\\sim N(0,\\sigma)``.
+"""
+struct AR1 <: Any
+    c::Real
+    rho::Real
+    sigma::Real
+end # AR1
 
 
 
